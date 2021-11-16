@@ -235,6 +235,8 @@ class CommandInterface(object):
         set_bootloader_pin(1 if not dtr_active_high else 0)
         set_reset_pin(0)
         set_reset_pin(1)
+        # Delay to get sonof itead working
+        time.sleep(0.1)
         set_reset_pin(0)
         # Make sure the pin is still asserted when the chip
         # comes out of reset. This fixes an issue where
