@@ -1019,6 +1019,60 @@ def print_version():
     print('%s %s' % (sys.argv[0], version))
 
 
+### add 20211117
+def setDTRState(serialPort, state):
+    serialPort.setDTR(state)
+
+
+def setRTSState(serialPort, state):
+    serialPort.setRTS(state)
+    # Work-around for adapters on Windows using the usbser.sys driver:
+    # generate a dummy change to DTR so that the set-control-line-state
+    # request is sent with the updated RTS state and the same DTR state
+    # 为了绕过Windows系统下驱动的问题,同时更新 RTS 和 DTR状态
+    serialPort.setDTR(serialPort.dtr)
+
+
+def enterBoot(serialPort, delay=False):
+    # delay is a workaround for bugs with the most common auto reset
+    # circuit and Windows, if the EN pin on the dev board does not have
+    # enough capacitance.
+    # 如果开发板上EN管脚没有足够电容
+    last_error = None
+
+    # issue reset-to-bootloader:
+    # RTS = either CH_PD/EN or nRESET (both active low = chip in reset
+    # DTR = GPIO0 (active low = boot to flasher)
+    #
+    # DTR & RTS are active low signals,
+    # ie True = pin @ 0V, False = pin @ VCC.
+    setDTRState(serialPort, False)  # IO0=HIGH
+    # setDTRState(serialPort, True)   # IO0=LOW
+    setRTSState(serialPort, True)  # EN=LOW, chip in reset
+    time.sleep(0.1)
+    if delay:
+        # Some chips are more likely to trigger the esp32r0
+        # watchdog reset silicon bug if they're held with EN=LOW
+        # for a longer period
+        time.sleep(1.2)
+
+    setDTRState(serialPort, True)  # IO0=LOW
+    setRTSState(serialPort, False)  # EN=HIGH, chip out of reset
+    if delay:
+        # Sleep longer after reset.
+        # This workaround only works on revision 0 ESP32 chips,
+        # it exploits a silicon bug spurious watchdog reset.
+        time.sleep(0.4)  # allow watchdog reset to occur
+    time.sleep(1)
+
+    setDTRState(serialPort, False)  # IO0=HIGH, done
+    setRTSState(serialPort, False)
+    time.sleep(1)
+
+    return last_error
+
+
+
 def usage():
     print("""Usage: %s [-DhqVfewvr] [-l length] [-p port] [-b baud] [-a addr] \
     [-i addr] [--bootloader-active-high] [--bootloader-invert-lines] [file.bin]
@@ -1086,6 +1140,7 @@ if __name__ == "__main__":
         usage()
         sys.exit(2)
 
+
     for o, a in opts:
         if o == '-V':
             QUIET = 10
@@ -1128,6 +1183,30 @@ if __name__ == "__main__":
             sys.exit(0)
         else:
             assert False, "Unhandled option"
+
+
+
+
+    mdebug(5, ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>")
+    if args[1] == 'sonoff':
+        try:
+            SP = serial.Serial(conf['port'],
+                                115200,
+                                timeout=5,
+                                parity=serial.PARITY_NONE,
+                                stopbits=serial.STOPBITS_ONE,
+                                rtscts=False)
+        except Exception as error:
+            mdebug(5, "serial port is fail")
+
+
+        enterBoot(SP, delay=False)
+        
+        if SP.is_open:
+            SP.close()
+            time.sleep(1) 
+    mdebug(5, "-----------ready to update-------------")
+
 
     try:
         # Sanity checks
